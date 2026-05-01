@@ -133,12 +133,17 @@ Trigger threshold: 5-of-7 (raised from 4-of-6 with the additional gate). Tunable
      TAIL_INDEX grows.
    - **Count fallback:** ≤ 3 concurrent CSPs regardless of capital. Hard
      ceiling against runaway as TAIL_INDEX list grows.
-3. **Interaction with manual stock long** — if you own WPM stock outright
-   AND have a CSP open, assignment doubles position. Need explicit policy:
-   skip CSP if existing stock position > X size? Or accept the doubling
-   and use it as cost-basis improvement?
-4. **Volatility filter** — should we require minimum IV percentile? CSPs
-   into compressed IV are less attractive than at IV peaks.
+3. ~~Stock + CSP interaction~~ — RESOLVED 2026-05-01 with Ultron:
+   - Policy: **accept assignment as cost-basis improvement** (aligned with
+     thesis: we want to own these names).
+   - Guard: skip the CSP if `(existing_stock_$ + put_strike × contracts × 100)
+     > 8% of account equity` for that ticker.
+   - **Critical: size the check using STRIKE, not spot price.** Assignment
+     obligation is strike × 100 per contract. Using spot underestimates the
+     breach (e.g. WPM $125 spot, $110 strike puts → 13% underestimate of
+     true assignment exposure).
+4. ~~Volatility filter~~ — RESOLVED above (folded into IV-rank gate in
+   premium-floor section).
 
 ## Time estimate
 
