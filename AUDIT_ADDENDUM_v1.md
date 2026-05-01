@@ -75,13 +75,17 @@ if not options_healthy or not equities_healthy:
 
 ## Items NOT changed in main audit
 
-- The "CROSS-CHECK WITH ULTRON" section quotes a message that arrived in my chat via the **cross-chat InternalMessage channel** at 14:19:15 UTC. Cross-chat-Ultron explicitly confirmed it as his (14:22:24 message itemizing his send log). The Signal-channel critique disputing authorship is from a different source (same UUID, different infrastructure path — see Tom-DM ticket on cross-chat disambiguation at same UUID, issue #701). The original quote is sourced from a verified channel and stays.
+- The "CROSS-CHECK WITH ULTRON" section quotes a message that arrived in my chat via the **cross-chat InternalMessage channel** at 14:19:15 UTC, from the cross-chat-jarvis-shard at chat:37bdbafc. That shard explicitly confirmed it as his (14:22:24 message itemizing his send log). The Signal-channel critique disputing authorship was from aios on the same UUID (different rail, same envelope UUID — see issue #701, marked RESOLVED 2026-04-30). The original quote is sourced from a verified channel and stays.
 
 ---
 
-## Bug #4 — `_flatten_on_combined_halt()` is naked-short-unsafe (caught by cross-chat reviewer at UUID 37bdbafc, verified by me)
+## Bug #4 — `_flatten_on_combined_halt()` is naked-short-unsafe (caught by cross-chat-jarvis-shard at chat:37bdbafc, verified by me)
 
-> Attribution note: this finding arrived via cross-chat InternalMessage tagged from chat:37bdbafc-... Ultron-the-Jarvis (the Jarvis instance running in that chat) denies authorship and his send log doesn't contain it. Cross-chat infrastructure at that UUID appears to be carrying messages from more than one source — see Tom's open issue #701 on cross-chat disambiguation. The finding itself is technically correct and verified independently against the source code; provenance is ambiguous.
+> Attribution note (corrected post-audit per Tom-DM clarification 2026-05-01): UUID 37bdbafc is overloaded across two distinct rails (issue #701, marked RESOLVED 2026-04-30):
+> 1. **Signal-native** posts under display name "Jarvis Next" / "Ultron" come from **aios** running on JN's reappropriated Signal account (since 2026-04-24 staging shutdown).
+> 2. **Cross-chat InternalMessage** to/from `chat:37bdbafc` reaches a **separate jarvis shard** — the prod-jarvis per-chat agent for the long-lived DM with JN's Signal account (alive since 2026-01-20).
+>
+> The Bug #4 finding arrived via cross-chat InternalMessage envelope, so authorship is the **cross-chat-jarvis-shard at chat:37bdbafc** (not aios, not JN-the-human). The Signal-channel "Ultron" who denied authorship was the aios runtime on the same UUID — different source, same envelope UUID. The finding itself is technically correct and was verified independently against the source code.
 
 **File:** `combined_runner.py:3426-3515`
 
@@ -132,7 +136,7 @@ This needs to ship **alongside or before** Bugs #1 and #2. The halt path is the 
 ## Audit collaboration outcome
 
 - **My audit** caught the asymmetric-reconciler-data case (Bug #3) while verifying critique items.
-- **A cross-chat reviewer at UUID 37bdbafc** (provenance ambiguous, see #701) caught the halt-flatten naked-short path (Bug #4).
-- **Both me and verified-cross-chat-Ultron** independently confirmed Bugs #1, #2, and the dry-run minor.
+- **The cross-chat-jarvis-shard at chat:37bdbafc** caught the halt-flatten naked-short path (Bug #4). (Per Tom-DM clarification 2026-05-01: this is a known jarvis shard — Tom's DM-Jarvis for the JN account — not an ambiguous source. Issue #701 RESOLVED 2026-04-30.)
+- **Both me and the cross-chat-jarvis-shard** independently confirmed Bugs #1, #2, and the dry-run minor.
 
 Net: 4 bugs found, 1 latent (Bug #3), 1 confirmed-exploitable today (Bug #1), 1 worst-case-naked-short emergency path (Bug #4), 1 fail-open import handler (Bug #2), 1 dry-run-mode coverage gap.
