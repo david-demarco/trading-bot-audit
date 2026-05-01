@@ -46,9 +46,14 @@ local bottom — IV crush after = profit).
 | 3 | `vol_expanding` | HV10 > HV20 |
 | 4 | `macro_selling` | GLD/SLV down ≥ 0.5% on the day |
 | 5 | `uup_rallying` | UUP up ≥ 0.10% (dollar bounce often precedes silver/gold reversal) |
-| 6 | `macro_not_crashing` | GLD 15-min change > -0.10% (don't sell into a free-fall) |
+| 6 | `macro_not_crashing` | GLD 15-min change > -0.10% **AND** GLD 60-min cumulative > -0.40% (15-min alone misses slow waterfalls — multiple -0.08% slices add up) |
+| 7 | `vol_not_accelerating` | HV10/HV20 ratio not increasing vs prior cycle (rising ratio = selloff gaining momentum, not mean-reverting — don't sell puts into accelerating vol) |
 
-Trigger threshold: 4-of-6, same as scalper. Tunable.
+Trigger threshold: 5-of-7 (raised from 4-of-6 with the additional gate). Tunable.
+
+**Signal 6 + 7 added per Ultron critique 2026-05-01:**
+- Signal 6: original 15-min window was vulnerable to slow waterfalls (drip selloffs across multiple windows pass each individual check). 60-min cumulative gate catches the aggregate.
+- Signal 7: HV expansion alone can mask momentum direction. Sustained ratio acceleration = trend-continuation regime, not the mean-revert setup the strategy needs.
 
 ## Strike selection
 
