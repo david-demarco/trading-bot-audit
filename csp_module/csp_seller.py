@@ -59,7 +59,7 @@ from slvr_cc_config import (
     GLD_TICKER,
     UUP_TICKER,
     SLV_TICKER,
-    ALPACA_BASE_URL,
+    ALPACA_BASE_URL as _SLVR_ALPACA_BASE_URL,  # legacy; see env override below
     ORDER_TIF,
     ALPACA_USER_ID,
     LOG_MAX_BYTES,
@@ -72,6 +72,28 @@ from slvr_cc_config import (
     YF_INTRADAY_INTERVAL,
     ALPACA_FEED,
 )
+
+# Live/paper credential separation (Ultron review 2026-05-01).
+#
+# The slvr_cc_config.ALPACA_BASE_URL is hardcoded to paper. Inheriting it as-is
+# makes the CSP module silently route to paper even after a live deploy.
+#
+# Resolution order:
+#   1. ALPACA_BASE_URL environment variable (set by deployment)
+#   2. Fall back to slvr_cc_config value (paper)
+#
+# Any production deployment MUST export ALPACA_BASE_URL=https://api.alpaca.markets
+# before launch. The plain assignment to slvr_cc_config's value is intentionally
+# preserved so CI/dev environments still work without env setup.
+import os as _os
+ALPACA_BASE_URL = _os.environ.get("ALPACA_BASE_URL", _SLVR_ALPACA_BASE_URL)
+if "paper" in ALPACA_BASE_URL:
+    import logging as _logging
+    _logging.getLogger("csp_seller").warning(
+        "CSP_SELLER routing to PAPER endpoint: %s "
+        "(set ALPACA_BASE_URL env var to override for live)",
+        ALPACA_BASE_URL,
+    )
 
 from combined_config import (
     TAIL_INDEX,
@@ -792,12 +814,21 @@ class CSPSignalEngine:
             if ok_15m:
                 score += 1
         else:
-            # No intraday data: fail-open (assume not crashing)
+            # FAIL-CLOSED (Ultron review 2026-05-01, audit addendum v2):
+            # Missing data is NOT evidence of safety. Same principle as
+            # options_overlay Bug #2 (ImportError fail-closed). When the
+            # macro intraday tape is unavailable we have no idea whether
+            # we're in a waterfall — refuse the signal rather than assume
+            # benign. Withholds tradability for that cycle; correct posture
+            # for a naked-short-adjacent gate.
             details["macro_not_crashing"] = {
-                "triggered": True,
-                "reason": "GLD intraday unavailable -- assuming not crashing (fail-open)",
+                "triggered": False,
+                "reason": (
+                    "GLD intraday unavailable -- NOT triggered (fail-closed). "
+                    "Missing tape is not evidence of safety."
+                ),
             }
-            score += 1
+            # score NOT incremented
 
         # --- Signal 7: vol ratio not accelerating vs prior cycle ---
         # HV10/HV20 ratio increasing >5% signals accelerating vol expansion —
@@ -822,22 +853,34 @@ class CSPSignalEngine:
                     ),
                 }
             else:
-                # No prior: assume stable (first cycle)
-                s7 = True
+                # FAIL-CLOSED (Ultron review 2026-05-01): No prior ratio = signal
+                # is undefined ("not accelerating *vs prior*" requires a prior).
+                # First-cycle auto-pass let one bad data window slip through.
+                # Force at least one full cycle of HV history before this gate
+                # can fire. Cost: one missed entry on bot cold-start. Benefit:
+                # no fail-open behavior.
+                s7 = False
                 details["vol_not_accelerating"] = {
-                    "triggered": True,
+                    "triggered": False,
                     "value": f"ratio={current_ratio:.3f} (no prior)",
-                    "reason": "No prior HV ratio -- assuming stable (first cycle)",
+                    "reason": (
+                        "No prior HV ratio -- NOT triggered (fail-closed, "
+                        "needs >=1 cycle of history)"
+                    ),
                 }
             if s7:
                 score += 1
         else:
-            # HV unavailable: fail-open
+            # FAIL-CLOSED (Ultron review 2026-05-01): HV data unavailable.
+            # Same principle as Signal 6 fail-closed above.
             details["vol_not_accelerating"] = {
-                "triggered": True,
-                "reason": "HV unavailable for ratio -- assuming stable (fail-open)",
+                "triggered": False,
+                "reason": (
+                    "HV unavailable -- NOT triggered (fail-closed). "
+                    "Missing vol data is not evidence of stability."
+                ),
             }
-            score += 1
+            # score NOT incremented
 
         triggered = score >= CSP_MIN_SELL_SIGNALS
         now_iso = datetime.now(timezone.utc).isoformat()

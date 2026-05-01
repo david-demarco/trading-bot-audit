@@ -205,7 +205,12 @@ class TestCSPSignalEngine:
                 )
 
     def test_signal7_first_cycle_no_prior(self, engine_and_data):
-        """Signal 7: no prior ratio → assumed stable (fail-open, scores 1)."""
+        """Signal 7: no prior ratio → fail-CLOSED (Ultron review 2026-05-01).
+
+        Previously assumed stable on first cycle. That was a fail-open path —
+        missing data is not evidence of stability. Now requires >=1 cycle of
+        HV history before the gate can fire.
+        """
         engine, data, GLD, SLV, UUP = engine_and_data
         closes = [100.0 + 0.5 * i for i in range(25)]
         df = _make_close_series(closes)
@@ -214,7 +219,31 @@ class TestCSPSignalEngine:
         data._prev_close["WPM"] = closes[-2]
         result = engine.evaluate_sell("WPM", prev_hv_ratios={})  # empty = no prior
         s7 = result.details["vol_not_accelerating"]
-        assert s7["triggered"] is True, "First cycle: no prior ratio should be fail-open"
+        assert s7["triggered"] is False, (
+            "First cycle: no prior ratio should be fail-CLOSED "
+            "(missing data is not evidence of stability)"
+        )
+
+    def test_signal6_no_intraday_failclosed(self, engine_and_data):
+        """Signal 6: GLD intraday unavailable → fail-CLOSED (Ultron review)."""
+        engine, data, GLD, SLV, UUP = engine_and_data
+        # No intraday data injected for GLD
+        result = engine.evaluate_sell("WPM")
+        s6 = result.details["macro_not_crashing"]
+        assert s6["triggered"] is False, (
+            f"No intraday data should be fail-CLOSED, got: {s6}"
+        )
+
+    def test_signal7_no_hv_failclosed(self, engine_and_data):
+        """Signal 7: no daily history (insufficient for HV) → fail-CLOSED."""
+        engine, data, GLD, SLV, UUP = engine_and_data
+        # WPM ticker has no daily data set up — HV computation will return None
+        # (engine_and_data fixture leaves _daily_data["WPM"] unset by default)
+        result = engine.evaluate_sell("WPM", prev_hv_ratios={"WPM": 0.95})
+        s7 = result.details["vol_not_accelerating"]
+        assert s7["triggered"] is False, (
+            f"No HV data should be fail-CLOSED, got: {s7}"
+        )
 
     def test_5_of_7_threshold(self, engine_and_data):
         """5 signals must fire to trigger; 4 must not."""
