@@ -168,8 +168,14 @@ CSP_MACRO_NOTCRASH_60M = -0.004  # GLD 60-min cumulative must be > -0.40%
 CSP_VOL_ACCEL_THRESHOLD = 0.05
 
 # --- Order execution ---
-CSP_SELL_OFFSET_FROM_MID = 0.02    # place limit $0.02 above mid
-CSP_BUYBACK_OFFSET_FROM_MID = 0.05 # buy back $0.05 above mid
+# Naming note (Ultron review 2026-05-01): the SELL offset is added to BID
+# (seller-favorable -- bid is the worst-case immediate fill, so bid + small
+# offset = "willing to give a tiny improvement above the bid to attract
+# buyers"). It is NOT added to mid_price. The constant name retains
+# "_FROM_MID" for parity with the scalper's analogous constant; the
+# arithmetic operates on bid. See limit_price assignment for actual base.
+CSP_SELL_OFFSET_FROM_MID = 0.02    # added to BID (not mid) for sell limit
+CSP_BUYBACK_OFFSET_FROM_MID = 0.05 # added to current mid for buyback limit
 
 # --- State / logging ---
 CSP_STATE_FILE = "csp_state.json"
@@ -1245,7 +1251,14 @@ class CSPExecutionLayer:
             return None
 
     def get_current_option_price(self, contract_symbol: str) -> Optional[float]:
-        """Fetch current mid-price for an options contract via Alpaca snapshot."""
+        """Fetch current mid-price for an options contract via Alpaca snapshot.
+
+        Note (Ultron review 2026-05-01): the data endpoint
+        ``data.alpaca.markets`` is INTENTIONALLY hardcoded separate from
+        ``ALPACA_BASE_URL``. The market-data API has the same host for both
+        paper and live accounts -- only the trading endpoint differs. This
+        URL must NOT be rebound by the live/paper credential refactor.
+        """
         if self.dry_run:
             return None
         try:
@@ -1582,17 +1595,20 @@ class CSPSeller:
         """Check exit conditions for an open CSP and buy back if triggered."""
         current_price = self.executor.get_current_option_price(pos.option_symbol)
         if current_price is None:
-            # Fall back to Black-Scholes estimate
-            underlying = self.data.get_price(pos.ticker)
-            if underlying is not None:
-                dte = pos.days_to_expiration
-                hv20 = self.data.compute_hv(pos.ticker, 20)
-                sigma = max(hv20 or 0.35, 0.10)
-                T = max(dte, 0) / 365.0
-                current_price = bs_put_price(underlying, pos.strike, T, RISK_FREE_RATE, sigma)
-            else:
-                logger.debug("CSP: cannot price %s -- skipping exit check", pos.option_symbol)
-                return
+            # Fall back to Black-Scholes estimate (Ultron review 2026-05-01:
+            # BS gives a mid-style theoretical price; comparing the put's
+            # current "mid" against entry premium can prematurely trigger
+            # the 50% profit exit because actual buy-back has to cross the
+            # ask, which is wider than mid. We do NOT close on BS estimates
+            # alone -- skip the exit check and wait for live data. Cost is
+            # one missed cycle of intraday-managed exit; benefit is no
+            # phantom-fill closes that the broker would never honor.
+            logger.debug(
+                "CSP: live price unavailable for %s -- skipping exit check "
+                "(refusing to exit on BS estimate alone, fail-closed)",
+                pos.option_symbol,
+            )
+            return
 
         exit_check = self.signals.evaluate_buy_back(pos, current_price)
         if not exit_check["triggered"]:
