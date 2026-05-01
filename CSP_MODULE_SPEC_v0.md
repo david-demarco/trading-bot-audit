@@ -110,12 +110,22 @@ Trigger threshold: 5-of-7 (raised from 4-of-6 with the additional gate). Tunable
 - Backtest: at least one full year on WPM / GDX with the signal set, so we
   see win-rate and expectancy before going live
 
+## Premium floor (resolved 2026-05-01 with Ultron)
+
+- **Floor: 2.0% of strike** per cycle (~30-45 DTE). 1.5% scalper floor is too
+  thin for fat-tail underwriting; 2.5% empirically too tight in compressed-IV
+  regimes (would zero out trading days).
+- **IV gate: WPM/GDX IV-rank > 30** (ticker-relative — must be elevated vs its
+  own recent range)
+- **Cross-asset confirm: SLV or GLD IV-rank > 30** (per Ultron — fat-tail
+  ticker IVR alone is misleading because the ticker may be structurally IV-
+  compressed; require metals-complex IV elevation as confirmation that we're
+  paid for tail risk, not eating idiosyncratic noise)
+- All three gates must pass.
+
 ## What I don't know yet (open questions)
 
-1. **Premium target on the SHORT-PUT side** — for CCs the floor is 1.5% of
-   the strike per cycle (~30 DTE). For CSPs at higher fat-tail IV, floor
-   should probably be HIGHER (2–2.5%) to compensate for the pinned tail.
-   Need backtest to calibrate.
+1. ~~Premium floor~~ — RESOLVED above.
 2. **Concurrent-position cap** — how many CSPs across the fat-tail list?
    Today only 2 names eligible; capital concentration risk if both fire
    together.
