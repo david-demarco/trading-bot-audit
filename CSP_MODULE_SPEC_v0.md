@@ -126,9 +126,13 @@ Trigger threshold: 5-of-7 (raised from 4-of-6 with the additional gate). Tunable
 ## What I don't know yet (open questions)
 
 1. ~~Premium floor~~ — RESOLVED above.
-2. **Concurrent-position cap** — how many CSPs across the fat-tail list?
-   Today only 2 names eligible; capital concentration risk if both fire
-   together.
+2. ~~Concurrent-position cap~~ — RESOLVED 2026-05-01 with Ultron:
+   - **Per-ticker:** 1 active CSP per ticker.
+   - **Capital cap:** ≤ 15% of total account equity across all active CSPs
+     combined. This is the real guard — scales with account size as
+     TAIL_INDEX grows.
+   - **Count fallback:** ≤ 3 concurrent CSPs regardless of capital. Hard
+     ceiling against runaway as TAIL_INDEX list grows.
 3. **Interaction with manual stock long** — if you own WPM stock outright
    AND have a CSP open, assignment doubles position. Need explicit policy:
    skip CSP if existing stock position > X size? Or accept the doubling
