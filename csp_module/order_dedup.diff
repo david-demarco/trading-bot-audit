@@ -1,0 +1,104 @@
+diff --git a/order_dedup.py b/order_dedup.py
+index 59354dd..74cf8b9 100644
+--- a/order_dedup.py
++++ b/order_dedup.py
+@@ -54,6 +54,7 @@ class OrderDeduplicator:
+         self._pmcc_manager = None        # PMCCManager instance
+         self._options_overlay = None     # OptionsOverlay instance
+         self._call_buyer = None          # Layer 4 CallBuyerManager instance
++        self._csp_seller = None          # CSPSeller instance (put-side engine)
+         self._pmcc_adapter_orders: Dict[str, str] = {}  # contract_symbol -> ticker for adapter-placed orders
+ 
+     def register_cc_scalper(self, cc_scalper) -> None:
+@@ -76,6 +77,11 @@ class OrderDeduplicator:
+         self._call_buyer = call_buyer
+         logger.info("OrderDeduplicator: Layer 4 Call Buyer registered")
+ 
++    def register_csp_seller(self, csp_seller) -> None:
++        """Register the CSP Seller engine for dedup checks (CSP:{ticker} namespace)."""
++        self._csp_seller = csp_seller
++        logger.info("OrderDeduplicator: CSP Seller registered")
++
+     def has_active_long_call(self, ticker: str) -> bool:
+         """Return True if Layer 4 has an open long call on ticker.
+ 
+@@ -174,6 +180,19 @@ class OrderDeduplicator:
+                 except Exception:
+                     return True  # fail-closed
+ 
++            # Source 6: CSP Seller — cross-engine mutual exclusion.
++            # If CSP has an active put sell on this ticker, block a CC sell too.
++            # (CC engines are already blocked from WPM/GDX by the tail-index
++            # gate, but this is defense-in-depth.)
++            if self._csp_seller:
++                if self._check_csp_active(ticker):
++                    logger.info(
++                        "DEDUP BLOCK: CSP Seller has active put on %s "
++                        "(CC+CSP mutual exclusion)",
++                        ticker,
++                    )
++                    return True
++
+             return False
+ 
+         except Exception as e:
+@@ -183,6 +202,26 @@ class OrderDeduplicator:
+             )
+             return True
+ 
++    def has_pending_or_active_csp(self, ticker: str) -> bool:
++        """Return True if CSP Seller has a pending or active put sell on ticker.
++
++        Used by CSPSeller before submitting to prevent duplicate CSP positions
++        (same-engine dedup) and by has_pending_or_active_sell for CC-side
++        cross-engine dedup.
++
++        FAIL-CLOSED: returns True on exception.
++        """
++        if self._csp_seller is None:
++            return False
++        try:
++            return self._check_csp_active(ticker)
++        except Exception as e:
++            logger.warning(
++                "DEDUP FAIL-CLOSED: has_pending_or_active_csp(%s) exception -- "
++                "assuming CSP IS active: %s", ticker, e,
++            )
++            return True
++
+     def has_conflicting_direction(self, ticker: str, proposed_side: str) -> bool:
+         """Return True if there's an open Alpaca order on ticker in the OPPOSITE direction.
+ 
+@@ -340,6 +379,20 @@ class OrderDeduplicator:
+             return True  # fail-closed
+         return False
+ 
++    def _check_csp_active(self, ticker: str) -> bool:
++        """Check if CSP Seller has an open put position on ticker.
++
++        Checks the CSP engine's in-memory state (open_positions).
++        FAIL-CLOSED: returns True on exception.
++        """
++        try:
++            for pos in self._csp_seller.state.open_positions():
++                if pos.ticker == ticker and pos.status == "open":
++                    return True
++        except Exception:
++            return True  # fail-closed
++        return False
++
+     @staticmethod
+     def _contract_matches_ticker(contract_symbol: str, ticker: str) -> bool:
+         """Check if an OCC option symbol corresponds to a given ticker.
+@@ -395,4 +448,11 @@ class OrderDeduplicator:
+             except Exception:
+                 parts.append("  Layer 4 Call Buyer: error reading state")
+ 
++        if self._csp_seller:
++            try:
++                open_csps = len(self._csp_seller.state.open_positions())
++                parts.append(f"  CSP Seller: {open_csps} open put positions")
++            except Exception:
++                parts.append("  CSP Seller: error reading state")
++
+         return "\n".join(parts)

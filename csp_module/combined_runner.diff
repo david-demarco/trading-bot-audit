@@ -1,0 +1,115 @@
+diff --git a/combined_runner.py b/combined_runner.py
+index add66af..0513e49 100644
+--- a/combined_runner.py
++++ b/combined_runner.py
+@@ -162,6 +162,15 @@ from pmcc_adapter import create_pmcc_manager
+ from combined_config import CC_OPTIONS_ELIGIBLE
+ from slvr_cc_scalper import CCScalper
+ 
++# CSP seller — cash-secured put engine for tail-index-eligible tickers (WPM, GDX)
++try:
++    from csp_seller import CSPSeller
++    _CSP_IMPORT_OK = True
++except ImportError as _csp_import_err:
++    logger.warning("CSP Seller import failed (non-fatal): %s", _csp_import_err)
++    CSPSeller = None  # type: ignore[assignment,misc]
++    _CSP_IMPORT_OK = False
++
+ # Position reconciliation — Alpaca as source of truth (Mar 18)
+ from combined_config import ALPACA_RECONCILIATION_ENABLED, RECONCILIATION_INTERVAL_SECONDS
+ from position_reconciler import reconcile_positions
+@@ -315,6 +324,9 @@ class CombinedRunner:
+         # --------------- CC Scalper (6-signal engine for swing CCs) ---------------
+         self._cc_scalper: Optional[CCScalper] = None
+ 
++        # --------------- CSP Seller (put-side for tail-index-eligible tickers) ---
++        self._csp_seller = None
++
+         # --------------- Layer 4: Call Buyer (call buying on dips) ---------------
+         self._call_buyer = None
+ 
+@@ -489,6 +501,22 @@ class CombinedRunner:
+                 logger.warning("CC Scalper init failed (non-fatal): %s", e)
+                 self._cc_scalper = None
+ 
++        # --- CSP Seller (put-side engine for tail-index-eligible tickers) ---
++        if not self.scalp_only and _CSP_IMPORT_OK and CSPSeller is not None:
++            try:
++                self._csp_seller = CSPSeller(dry_run=self.dry_run)
++                csp_init_ok = self._csp_seller.initialize()
++                if csp_init_ok:
++                    logger.info(
++                        "CSP Seller initialized (eligible: %s)",
++                        self._csp_seller.active_tickers() or "none yet",
++                    )
++                else:
++                    logger.warning("CSP Seller initialized with errors (non-fatal)")
++            except Exception as e:
++                logger.warning("CSP Seller init failed (non-fatal): %s", e)
++                self._csp_seller = None
++
+         # --- Layer 4: Call Buyer on Dips ---
+         if not self.scalp_only and CALL_BUYER_ENABLED:
+             try:
+@@ -534,6 +562,10 @@ class CombinedRunner:
+             self._order_dedup.register_options_overlay(self.options_overlay)
+         if self._call_buyer:
+             self._order_dedup.register_call_buyer(self._call_buyer)
++        if self._csp_seller:
++            self._order_dedup.register_csp_seller(self._csp_seller)
++            self._csp_seller._order_dedup = self._order_dedup
++            logger.info("CSP Seller wired to order deduplicator")
+ 
+         # --- Risk manager ---
+         self.risk_mgr = UnifiedRiskManager(self.state, self.equity)
+@@ -3297,6 +3329,25 @@ class CombinedRunner:
+             else:
+                 logger.info("CC SCALPER: no seasoned swing tickers eligible for options (all have active CCs or no options chain)")
+ 
++        # --- Engine 4: CSP Seller (put-side for tail-index-preferred tickers) ---
++        # WPM/GDX are blocked from CC selling by the tail-index gate; CSP fills
++        # the gap by selling puts instead. Runs unconditionally (not gated on
++        # swing seasoning) since CSPs don't require underlying share coverage.
++        if self._csp_seller and self._trading_allowed("csp_seller.run_cycle"):
++            try:
++                csp_result = self._csp_seller.run_once()
++                csp_sells = [s for s in csp_result.get("sell_signals", []) if s.get("triggered")]
++                csp_buybacks = [b for b in csp_result.get("buy_back_signals", []) if b.get("triggered")]
++                logger.info(
++                    "CSP CYCLE: %d sells triggered, %d buybacks triggered",
++                    len(csp_sells), len(csp_buybacks),
++                )
++            except Exception as e:
++                logger.error(
++                    "CSP Seller cycle error (non-fatal): %s\n%s",
++                    e, traceback.format_exc(),
++                )
++
+     # ================================================================
+     # EOD Reconciliation
+     # ================================================================
+@@ -3562,6 +3613,24 @@ class CombinedRunner:
+             if p.stage != TradeStage.CLOSED.value
+         ]
+ 
++        # ---- CSP Seller leg: skip entirely on halt ----
++        # Assignment-on-flatten exposes to gap risk: if we close the short put
++        # while the stock is gapping down, we may get assigned on the very
++        # move the halt is reacting to.  CSP lifecycle (50% profit / stop-loss
++        # / DTE trigger) handles its own exit timing.  Mirror of Bug #4 CC skip.
++        if self._csp_seller:
++            try:
++                open_csps = self._csp_seller.state.open_positions()
++                if open_csps:
++                    logger.warning(
++                        "FLATTEN SKIP (CSP): %d open put position(s) preserved — "
++                        "assignment-on-flatten exposes gap risk; CSP lifecycle "
++                        "manages exit. Manual review may be required.",
++                        len(open_csps),
++                    )
++            except Exception:
++                pass  # non-fatal; CSP state read failure doesn't block flatten
++
+         # ---- Scalp leg: state.scalp_positions ----
+         for pos in list(self.state.scalp_positions):
+             if pos.stage == TradeStage.CLOSED.value:
