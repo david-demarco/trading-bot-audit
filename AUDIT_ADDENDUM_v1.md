@@ -79,7 +79,9 @@ if not options_healthy or not equities_healthy:
 
 ---
 
-## Bug #4 — `_flatten_on_combined_halt()` is naked-short-unsafe (caught by cross-chat-Ultron, verified by me)
+## Bug #4 — `_flatten_on_combined_halt()` is naked-short-unsafe (caught by cross-chat reviewer at UUID 37bdbafc, verified by me)
+
+> Attribution note: this finding arrived via cross-chat InternalMessage tagged from chat:37bdbafc-... Ultron-the-Jarvis (the Jarvis instance running in that chat) denies authorship and his send log doesn't contain it. Cross-chat infrastructure at that UUID appears to be carrying messages from more than one source — see Tom's open issue #701 on cross-chat disambiguation. The finding itself is technically correct and verified independently against the source code; provenance is ambiguous.
 
 **File:** `combined_runner.py:3426-3515`
 
@@ -89,7 +91,7 @@ When the kill-switch fires, every CC-covered swing position has its underlying c
 
 Compounding the risk: the halt fires when the portfolio is already at its loss limit — exactly when positions are deep in loss AND most likely have CCs against them (CCs were written when the stock was higher, so they're now ITM or close to it). Closing the underlying at the worst possible moment leaves a short call against zero collateral.
 
-**Verified by Ultron's claim that the parallel Friday path IS safe:** read `combined_runner.py:2952` — confirmed `if self._has_active_cc(pos.ticker): logger.info("FRIDAY CARRY (CC active)..."); continue`. Friday is fail-safe; halt is not.
+**Verified the parallel Friday path IS safe:** read `combined_runner.py:2952` — confirmed `if self._has_active_cc(pos.ticker): logger.info("FRIDAY CARRY (CC active)..."); continue`. Friday is fail-safe; halt is not.
 
 **Severity:** HIGH. The other "naked-short structurally sound" verdict in the main audit is overstated for this one path. The 3-layer guard chain protects normal entry/exit lifecycle, but not the halt-flatten emergency path.
 
@@ -129,9 +131,8 @@ This needs to ship **alongside or before** Bugs #1 and #2. The halt path is the 
 
 ## Audit collaboration outcome
 
-Each side caught a bug the other missed:
-- **My audit** caught the asymmetric-reconciler-data case (Bug #3) when verifying Ultron's critique items.
-- **Cross-chat-Ultron's critique** caught the halt-flatten naked-short path (Bug #4).
-- **Both sides** independently confirmed Bugs #1, #2, and the dry-run minor.
+- **My audit** caught the asymmetric-reconciler-data case (Bug #3) while verifying critique items.
+- **A cross-chat reviewer at UUID 37bdbafc** (provenance ambiguous, see #701) caught the halt-flatten naked-short path (Bug #4).
+- **Both me and verified-cross-chat-Ultron** independently confirmed Bugs #1, #2, and the dry-run minor.
 
 Net: 4 bugs found, 1 latent (Bug #3), 1 confirmed-exploitable today (Bug #1), 1 worst-case-naked-short emergency path (Bug #4), 1 fail-open import handler (Bug #2), 1 dry-run-mode coverage gap.
